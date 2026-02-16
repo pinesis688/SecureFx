@@ -101,7 +101,7 @@
 
 直接打开 `index.html` 即可使用，无需安装。
 
-或访问在线版本：[https://securefx.vercel.app](https://securefx.vercel.app)
+或访问在线版本：[https://secure-fx.vercel.app](https://secure-fx.vercel.app)
 
 ## 💻 浏览器兼容性
 
@@ -121,6 +121,7 @@ MIT License
 - 111 (💡 灵感来源)
 - pinesis
 - Trae CN
+- 维爱（第一个捐赠者）
 
 ## 🏆 徽章
 
