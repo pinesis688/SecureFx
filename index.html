@@ -1,0 +1,1195 @@
+<!--
+  SecureFx 加密工具箱
+  Copyright (c) 2024-2025 SecureFx Contributors
+  SPDX-License-Identifier: MIT
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="SecureFx 加密工具 - 文件加密、RSA、哈希、Base64、密码生成">
+    <meta name="theme-color" content="#3b82f6">
+    <title>SecureFx</title>
+
+    <link rel="icon" type="image/svg+xml"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%233b82f6'/%3E%3Crect x='25' y='45' width='50' height='40' rx='5' fill='%23fff'/%3E%3Cpath d='M35 45V35a15 15 0 1 1 30 0v10' stroke='%23fff' stroke-width='8' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='50' cy='65' r='6' fill='%233b82f6'/%3E%3Crect x='47' y='65' width='6' height='12' rx='2' fill='%233b82f6'/%3E%3C/svg%3E">
+    <link rel="apple-touch-icon"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%233b82f6'/%3E%3Crect x='25' y='45' width='50' height='40' rx='5' fill='%23fff'/%3E%3Cpath d='M35 45V35a15 15 0 1 1 30 0v10' stroke='%23fff' stroke-width='8' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='50' cy='65' r='6' fill='%233b82f6'/%3E%3Crect x='47' y='65' width='6' height='12' rx='2' fill='%233b82f6'/%3E%3C/svg%3E">
+
+    <script>
+        window.argon2LoadPromise = new Promise((resolve) => {
+            let loaded = false;
+            function checkArgon2() {
+                if (typeof argon2 !== 'undefined' && argon2.hash) {
+                    loaded = true;
+                    resolve(true);
+                    return true;
+                }
+                return false;
+            }
+            if (checkArgon2()) return;
+            const script1 = document.createElement('script');
+            script1.src = 'argon2-bundled.min.js';
+            script1.onload = () => {
+                if (!loaded) {
+                    setTimeout(() => { if (checkArgon2()) return; resolve(false); }, 500);
+                }
+            };
+            script1.onerror = () => resolve(false);
+            document.head.appendChild(script1);
+            setTimeout(() => { if (!loaded) resolve(false); }, 15000);
+        });
+    </script>
+
+    <script src="zxcvbn.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <script>
+        // 清除旧的确认记录，确保对话框显示（调试用）
+        // localStorage.removeItem('securefx_risk_acknowledged');
+
+        // 强制重新显示安全警告框（按住 Ctrl+Shift+S）
+        document.addEventListener('keydown', function (e) {
+            if (e.ctrlKey && e.shiftKey && e.key === 'S') {
+                localStorage.removeItem('securefx_risk_acknowledged');
+                location.reload();
+            }
+        });
+
+        // 安全警告框处理函数
+        document.addEventListener('DOMContentLoaded', function () {
+            var overlay = document.getElementById('securityModalOverlay');
+            var acceptBtn = document.getElementById('securityAcceptBtn');
+            var declineBtn = document.getElementById('securityDeclineBtn');
+            var checkDevice = document.getElementById('checkDevice');
+            var checkUnderstand = document.getElementById('checkUnderstand');
+
+            // 检查是否需要显示警告框
+            if (localStorage.getItem('securefx_risk_acknowledged')) {
+                if (overlay) overlay.classList.remove('active');
+                return;
+            }
+
+            // 更新按钮状态
+            function updateButtonState() {
+                var allChecked = (checkDevice && checkDevice.checked) && (checkUnderstand && checkUnderstand.checked);
+                if (acceptBtn) {
+                    if (allChecked) {
+                        acceptBtn.removeAttribute('disabled');
+                    } else {
+                        acceptBtn.setAttribute('disabled', 'disabled');
+                    }
+                }
+            }
+
+            // 绑定复选框事件
+            if (checkDevice) checkDevice.addEventListener('change', updateButtonState);
+            if (checkUnderstand) checkUnderstand.addEventListener('change', updateButtonState);
+
+            // 接受按钮点击
+            if (acceptBtn) {
+                acceptBtn.onclick = function () {
+                    if (!this.hasAttribute('disabled')) {
+                        localStorage.setItem('securefx_risk_acknowledged', 'true');
+                        if (overlay) overlay.classList.remove('active');
+                    }
+                };
+            }
+
+            // 拒绝按钮点击
+            if (declineBtn) {
+                declineBtn.onclick = function () {
+                    document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;font-family:system-ui;background:#1f2937;"><h2 style="color:#f3f4f6;">操作终止</h2><p style="color:#9ca3af;margin-top:8px;">请在理解风险后使用本工具</p></div>';
+                };
+            }
+
+            // 初始化按钮状态
+            updateButtonState();
+        });
+    </script>
+    <div class="env-warning" id="envWarning">⚠️ 检测到非安全环境！请在 Chrome/Firefox 等标准浏览器中打开</div>
+
+    <div class="security-modal-overlay active" id="securityModalOverlay">
+        <div class="security-modal">
+            <div class="security-modal-header">
+                <h2 id="securityTitle">安全声明</h2>
+            </div>
+            <div class="security-modal-content">
+                <div id="warningBlock">
+                    <p id="warningText">
+                        <strong>⚠️ 本工具无法防御：</strong>恶意软件、键盘记录器、系统级攻击、内存dump等威胁。JavaScript环境无法实现真正的安全内存擦除。
+                    </p>
+                </div>
+                <div id="prohibitBlock">
+                    <p id="prohibitText">
+                        <strong>🚫 禁止用于：</strong>国家秘密、金融核心数据、等保三级以上数据、任何法律禁止的场景。
+                    </p>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:10px;">
+                    <label class="checkbox-label"
+                        style="padding:10px 12px;background:var(--input-bg);border-radius:6px;border:1px solid var(--border);">
+                        <input type="checkbox" id="checkUnderstand">
+                        <span id="checkUnderstandText">我理解上述风险并接受JavaScript环境的固有限制</span>
+                    </label>
+                    <label class="checkbox-label"
+                        style="padding:10px 12px;background:var(--input-bg);border-radius:6px;border:1px solid var(--border);">
+                        <input type="checkbox" id="checkDevice">
+                        <span id="checkDeviceText">当前设备可信、网络环境安全、浏览器无恶意扩展</span>
+                    </label>
+                </div>
+            </div>
+            <div class="security-modal-footer">
+                <button type="button" id="securityDeclineBtn" class="btn btn-outline" style="width:auto;"
+                    onclick="handleDecline()">拒绝</button>
+                <button type="button" id="securityAcceptBtn" class="btn" style="width:auto;" disabled
+                    onclick="handleAccept()">接受并继续</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="sidebar" id="pc-sidebar">
+            <div class="sidebar-logo">
+                <div class="logo-icon">🔐</div>
+                <h2 data-i18n="title">加密工具箱</h2>
+            </div>
+            <div class="theme-toggle" id="themeToggle" title="切换暗色模式">🌙</div>
+            <div class="nav-item-pc active" data-target="file-encrypt-section">
+                <span>🔐</span><span data-i18n="nav.encrypt">加密工具</span>
+            </div>
+            <div class="nav-item-pc" data-target="rsa-section">
+                <span>🔑</span><span data-i18n="nav.asym">非对称加密</span>
+            </div>
+            <div class="nav-item-pc" data-target="signature-section">
+                <span>✍️</span><span data-i18n="nav.sign">数字签名</span>
+            </div>
+            <div class="nav-item-pc" data-target="hash-section">
+                <span>#️⃣</span><span data-i18n="nav.hash">哈希校验</span>
+            </div>
+            <div class="nav-item-pc" data-target="encoding-section">
+                <span>🔧</span><span data-i18n="nav.encoding">编码工具</span>
+            </div>
+            <div class="nav-item-pc" data-target="password-section">
+                <span>🎲</span><span data-i18n="nav.password">密码生成</span>
+            </div>
+            <div class="nav-item-pc" data-target="keygen-section">
+                <span>🗝️</span><span data-i18n="nav.keygen">密钥管理</span>
+            </div>
+            <div class="nav-item-pc" data-target="password-strength-section">
+                <span>📊</span><span>密码强度检测</span>
+            </div>
+            <div class="nav-item-pc" data-target="randomness-section">
+                <span>🎲</span><span>随机性检测</span>
+            </div>
+            <div class="nav-item-pc" data-target="selftest-section">
+                <span>✅</span><span data-i18n="nav.selftest">自检/说明</span>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <header class="header">
+                <h1 class="app-title">SecureFx 加密工具箱</h1>
+                <p class="app-subtitle">文件加密 · RSA/ECC · 哈希 · 编码工具 · 密码生成</p>
+            </header>
+
+            <div class="security-banner" id="securityBanner">
+                <span>🔒 安全模式 - 所有操作均在本地完成</span>
+            </div>
+
+            <!-- 加密工具（合并文件加密和文本加密） -->
+            <div id="file-encrypt-section" class="section active">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon">🔐</div>
+                        <h2 class="card-title" data-i18n="encrypt.title">加密工具</h2>
+                    </div>
+                    <div class="mode-toggle">
+                        <button class="mode-toggle-btn active" data-encrypt-type="file">📁 <span
+                                data-i18n="encrypt.title">文件加密</span></button>
+                        <button class="mode-toggle-btn" data-encrypt-type="text">📝 <span
+                                data-i18n="encrypt.textEncrypt">文本加密</span></button>
+                    </div>
+                    <div id="file-encrypt-panel">
+                        <div class="mode-toggle" style="margin-top:10px;">
+                            <button class="mode-toggle-btn active" data-mode="encrypt">🔐 <span
+                                    data-i18n="encrypt.encrypt">加密</span></button>
+                            <button class="mode-toggle-btn" data-mode="decrypt">🔓 <span
+                                    data-i18n="encrypt.decrypt">解密</span></button>
+                        </div>
+                        <div class="algo-selector">
+                            <div class="algo-option selected" data-kdf="argon2">
+                                <h4>🛡️ Argon2id</h4>
+                                <p>抗GPU攻击 · 推荐</p>
+                            </div>
+                            <div class="algo-option" data-kdf="scrypt">
+                                <h4>💾 Scrypt</h4>
+                                <p>内存硬函数</p>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">📁 <span data-i18n="encrypt.selectFile">选择文件</span></label>
+                            <div class="file-upload-wrapper">
+                                <div class="file-upload-area" id="fileUploadArea">
+                                    <span class="file-upload-icon">📤</span>
+                                    <div class="file-upload-text" data-i18n="encrypt.dragFile">点击或拖拽文件到此处</div>
+                                </div>
+                                <input type="file" id="fileInput" class="file-upload-input" accept="*/*">
+                            </div>
+                            <div class="file-info" id="fileInfo"></div>
+                        </div>
+                        <div class="form-group" id="passwordGroup">
+                            <label class="form-label">🔐 <span data-i18n="encrypt.password">密码</span></label>
+                            <input type="password" id="filePassword" class="form-control"
+                                data-i18n-placeholder="encrypt.passwordPlaceholder" placeholder="输入密码（至少8位）">
+                            <div class="password-strength" id="filePasswordStrength"></div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">⚙️ <span data-i18n="encrypt.options">加密选项</span></label>
+                            <div class="checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="anonymousMode">
+                                    <span data-i18n="encrypt.anonymous">匿名模式（隐藏原始文件名）</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-group" id="signOptionGroup">
+                            <label class="form-label">✍️ <span data-i18n="encrypt.signOption">签名选项（可选）</span></label>
+                            <div class="checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="enableSignEncrypt">
+                                    <span data-i18n="encrypt.signEncrypt">加密时同时签名（需提供私钥）</span>
+                                </label>
+                            </div>
+                            <textarea id="signEncryptPrivateKey" class="form-control textarea" rows="3"
+                                data-i18n-placeholder="encrypt.pasteKey" placeholder="粘贴您的ECDSA私钥..."
+                                style="display:none;"></textarea>
+                        </div>
+                        <button class="btn" id="fileEncryptBtn">🔒 <span
+                                data-i18n="encrypt.startEncrypt">开始加密</span></button>
+                        <button class="btn btn-success" id="fileDecryptBtn" style="display:none;">🔓 <span
+                                data-i18n="encrypt.startDecrypt">开始解密</span></button>
+                        <div class="progress-container" id="fileProgress">
+                            <div class="progress-header">
+                                <span id="fileProgressStatus" data-i18n="encrypt.progress.init">准备中...</span>
+                                <span id="fileProgressPercent">0%</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="fileProgressFill"></div>
+                            </div>
+                            <button class="btn btn-danger" id="cancelOperationBtn"
+                                style="margin-top:10px;display:none;">❌ <span
+                                    data-i18n="encrypt.cancel">取消操作</span></button>
+                        </div>
+                        <div id="fileResult" class="result-box"></div>
+                        <div class="download-buttons" id="fileDownloadBtns" style="display:none;">
+                            <div class="download-btn" id="fileDownloadBtn"><span>💾</span><span
+                                    data-i18n="encrypt.download">下载文件</span></div>
+                        </div>
+                    </div>
+                    <div id="text-encrypt-panel" style="display:none;">
+                        <div class="mode-toggle" style="margin-top:10px;">
+                            <button class="mode-toggle-btn active" data-text-mode="encrypt">🔐 <span
+                                    data-i18n="encrypt.encrypt">加密</span></button>
+                            <button class="mode-toggle-btn" data-text-mode="decrypt">🔓 <span
+                                    data-i18n="encrypt.decrypt">解密</span></button>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">📝 <span data-i18n="text.input">输入文本</span></label>
+                            <textarea id="textInput" class="form-control textarea" rows="6"
+                                data-i18n-placeholder="text.inputPlaceholder" placeholder="输入要加密/解密的文本"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">🔐 <span data-i18n="encrypt.password">密码</span></label>
+                            <input type="password" id="textPassword" class="form-control" placeholder="输入密码">
+                        </div>
+                        <button class="btn" id="textEncryptBtn">🔐 <span data-i18n="text.encrypt">加密文本</span></button>
+                        <button class="btn btn-success" id="textDecryptBtn" style="display:none;">🔓 <span
+                                data-i18n="text.decrypt">解密文本</span></button>
+                        <div class="form-group" style="margin-top:20px;">
+                            <label class="form-label">📋 <span data-i18n="text.output">输出结果</span></label>
+                            <textarea id="textOutput" class="form-control textarea" rows="6" readonly
+                                placeholder="结果将显示在这里"></textarea>
+                        </div>
+                        <div class="download-buttons">
+                            <div class="download-btn" id="copyTextBtn"><span>📋</span><span
+                                    data-i18n="common.copy">复制结果</span></div>
+                            <div class="download-btn" id="clearTextBtn"><span>🗑️</span><span
+                                    data-i18n="selftest.clear">清空</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 非对称加密（合并RSA和ECC） -->
+            <div id="rsa-section" class="section">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon">🔑</div>
+                        <h2 class="card-title" data-i18n="nav.asym">非对称加密</h2>
+                    </div>
+                    <div class="mode-toggle">
+                        <button class="mode-toggle-btn active" data-asym-type="rsa">🔑 RSA</button>
+                        <button class="mode-toggle-btn" data-asym-type="ecc">🔵 ECC</button>
+                    </div>
+
+                    <!-- RSA 面板 -->
+                    <div id="rsa-panel">
+                        <div class="mode-toggle" style="margin-top:10px;">
+                            <button class="mode-toggle-btn active" data-rsa-mode="generate">🎲 <span
+                                    data-i18n="asym.generateKey">生成密钥</span></button>
+                            <button class="mode-toggle-btn" data-rsa-mode="encrypt">🔐 <span
+                                    data-i18n="asym.encrypt">加密</span></button>
+                            <button class="mode-toggle-btn" data-rsa-mode="decrypt">🔓 <span
+                                    data-i18n="asym.decrypt">解密</span></button>
+                        </div>
+                        <div id="rsa-generate-panel">
+                            <div class="form-group">
+                                <label class="form-label">📏 <span data-i18n="asym.keyLength">密钥长度</span></label>
+                                <select id="rsaKeySize" class="form-control">
+                                    <option value="2048">2048 <span data-i18n="asym.bitRecommended">位（推荐）</span>
+                                    </option>
+                                    <option value="4096">4096 <span data-i18n="asym.bitMoreSecure">位（更安全）</span>
+                                    </option>
+                                </select>
+                            </div>
+                            <button class="btn" id="generateRSAKeysBtn">🎲 <span
+                                    data-i18n="asym.generateRSA">生成RSA密钥对</span></button>
+                        </div>
+                        <div id="rsa-encrypt-panel" style="display:none;">
+                            <div class="form-group">
+                                <label class="form-label">🔑 <span
+                                        data-i18n="asym.publicKeyPem">公钥（PEM格式）</span></label>
+                                <textarea id="rsaPublicKey" class="form-control textarea" rows="4"
+                                    data-i18n-placeholder="asym.pastePublicKey" placeholder="粘贴公钥或先生成密钥对"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">📝 <span data-i18n="asym.textToEncrypt">要加密的文本</span></label>
+                                <textarea id="rsaPlaintext" class="form-control textarea" rows="3"
+                                    data-i18n-placeholder="asym.textToEncryptHint"
+                                    placeholder="输入要加密的文本（建议小于200字节）"></textarea>
+                            </div>
+                            <button class="btn" id="rsaEncryptBtn">🔐 <span data-i18n="asym.encrypt">加密</span></button>
+                        </div>
+                        <div id="rsa-decrypt-panel" style="display:none;">
+                            <div class="form-group">
+                                <label class="form-label">🔑 <span
+                                        data-i18n="asym.privateKeyPem">私钥（PEM格式）</span></label>
+                                <textarea id="rsaPrivateKey" class="form-control textarea" rows="4"
+                                    data-i18n-placeholder="asym.pastePrivateKey" placeholder="粘贴私钥"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">🔐 <span
+                                        data-i18n="asym.encryptedText">加密文本（Base64）</span></label>
+                                <textarea id="rsaCiphertext" class="form-control textarea" rows="3"
+                                    data-i18n-placeholder="asym.pasteEncrypted" placeholder="粘贴加密后的Base64文本"></textarea>
+                            </div>
+                            <button class="btn btn-success" id="rsaDecryptBtn">🔓 <span
+                                    data-i18n="asym.decrypt">解密</span></button>
+                        </div>
+                        <div class="form-group" style="margin-top:20px;">
+                            <label class="form-label">📋 <span data-i18n="asym.output">输出结果</span></label>
+                            <textarea id="rsaOutput" class="form-control textarea" rows="6" readonly></textarea>
+                        </div>
+                        <div class="download-buttons" id="rsaDownloadBtns" style="display:none;">
+                            <div class="download-btn" id="copyRSABtn"><span>📋</span><span
+                                    data-i18n="asym.copy">复制</span></div>
+                            <div class="download-btn" id="downloadRSAKeysBtn"><span>💾</span><span
+                                    data-i18n="asym.downloadKey">下载密钥</span></div>
+                        </div>
+                    </div>
+
+                    <!-- ECC 面板 -->
+                    <div id="ecc-panel" style="display:none;">
+                        <div class="mode-toggle" style="margin-top:10px;">
+                            <button class="mode-toggle-btn active" data-ecc-mode="generate">🎲 <span
+                                    data-i18n="asym.generateKey">生成密钥</span></button>
+                            <button class="mode-toggle-btn" data-ecc-mode="encrypt">🔐 <span
+                                    data-i18n="asym.encrypt">加密</span></button>
+                            <button class="mode-toggle-btn" data-ecc-mode="decrypt">🔓 <span
+                                    data-i18n="asym.decrypt">解密</span></button>
+                        </div>
+                        <div id="ecc-generate-panel">
+                            <button class="btn" id="generateECCKeysBtn">🔵 <span data-i18n="asym.generateECC">生成 ECC 密钥对
+                                    (P-256)</span></button>
+                            <div class="form-group" style="margin-top:20px;">
+                                <label class="form-label">🔑 <span data-i18n="asym.publicKey">公钥</span></label>
+                                <textarea id="eccPublicKey" class="form-control textarea" readonly
+                                    data-i18n-placeholder="asym.publicKeyPlaceholder"
+                                    placeholder="公钥将显示在这里..."></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">🔐 <span data-i18n="asym.privateKey">私钥</span></label>
+                                <textarea id="eccPrivateKey" class="form-control textarea" readonly
+                                    data-i18n-placeholder="asym.privateKeyPlaceholder"
+                                    placeholder="私钥将显示在这里..."></textarea>
+                            </div>
+                            <div class="download-buttons">
+                                <div class="download-btn" id="downloadECCKeysBtn"><span>💾</span><span
+                                        data-i18n="asym.saveKey">保存密钥</span></div>
+                            </div>
+                        </div>
+                        <div id="ecc-encrypt-panel" style="display:none;">
+                            <div class="form-group">
+                                <label class="form-label">🔑 <span
+                                        data-i18n="asym.recipientPublicKey">接收方公钥</span></label>
+                                <textarea id="eccRecipientPublicKey" class="form-control textarea"
+                                    data-i18n-placeholder="asym.pasteRecipientKey" placeholder="粘贴接收方的公钥..."></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">📝 <span data-i18n="asym.textToEncrypt">要加密的文本</span></label>
+                                <textarea id="eccPlaintext" class="form-control textarea"
+                                    placeholder="输入要加密的文本..."></textarea>
+                            </div>
+                            <button class="btn" id="eccEncryptBtn">🔒 <span data-i18n="asym.encrypt">加密</span></button>
+                        </div>
+                        <div id="ecc-decrypt-panel" style="display:none;">
+                            <div class="form-group">
+                                <label class="form-label">🔐 <span data-i18n="asym.privateKey">私钥</span></label>
+                                <textarea id="eccDecryptPrivateKey" class="form-control textarea"
+                                    placeholder="粘贴您的私钥..."></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">🔐 <span
+                                        data-i18n="asym.encryptedText">加密文本（Base64）</span></label>
+                                <textarea id="eccCiphertext" class="form-control textarea"
+                                    placeholder="粘贴加密后的Base64文本..."></textarea>
+                            </div>
+                            <button class="btn btn-success" id="eccDecryptBtn">🔓 <span
+                                    data-i18n="asym.decrypt">解密</span></button>
+                        </div>
+                        <div class="form-group" style="margin-top:20px;">
+                            <label class="form-label">📋 <span data-i18n="asym.output">输出结果</span></label>
+                            <textarea id="eccOutput" class="form-control textarea" rows="4" readonly></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 哈希校验（合并文本哈希和文件校验） -->
+            <div id="hash-section" class="section">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon">#️⃣</div>
+                        <h2 class="card-title" data-i18n="hash.title">哈希校验</h2>
+                    </div>
+                    <div class="mode-toggle">
+                        <button class="mode-toggle-btn active" data-hash-type="text">📝 <span
+                                data-i18n="hash.textHash">文本哈希</span></button>
+                        <button class="mode-toggle-btn" data-hash-type="file">📁 <span
+                                data-i18n="hash.fileHash">文件校验</span></button>
+                    </div>
+                    <div id="text-hash-panel">
+                        <div class="form-group">
+                            <label class="form-label">📝 <span data-i18n="hash.inputText">输入文本</span></label>
+                            <textarea id="hashInput" class="form-control textarea" rows="4"
+                                data-i18n-placeholder="hash.inputPlaceholder" placeholder="输入要计算哈希的文本"></textarea>
+                        </div>
+                        <div class="algo-selector">
+                            <div class="algo-option selected" data-hash="sha256">
+                                <h4>SHA-256</h4>
+                                <p>32<span data-i18n="hash.bytes">字节</span> · <span
+                                        data-i18n="hash.recommended">推荐</span></p>
+                            </div>
+                            <div class="algo-option" data-hash="sha384">
+                                <h4>SHA-384</h4>
+                                <p>48<span data-i18n="hash.bytes">字节</span></p>
+                            </div>
+                            <div class="algo-option" data-hash="sha512">
+                                <h4>SHA-512</h4>
+                                <p>64<span data-i18n="hash.bytes">字节</span></p>
+                            </div>
+                            <div class="algo-option" data-hash="sha3-256">
+                                <h4>SHA3-256</h4>
+                                <p>32<span data-i18n="hash.bytes">字节</span> · <span
+                                        data-i18n="hash.newStandard">新标准</span></p>
+                            </div>
+                            <div class="algo-option" data-hash="sha3-512">
+                                <h4>SHA3-512</h4>
+                                <p>64<span data-i18n="hash.bytes">字节</span> · <span
+                                        data-i18n="hash.newStandard">新标准</span></p>
+                            </div>
+                            <div class="algo-option" data-hash="sm3">
+                                <h4>SM3</h4>
+                                <p>32<span data-i18n="hash.bytes">字节</span> · 国密</p>
+                            </div>
+                            <div class="algo-option" data-hash="md5">
+                                <h4>MD5</h4>
+                                <p>16<span data-i18n="hash.bytes">字节</span> · 不推荐</p>
+                            </div>
+                        </div>
+                        <button class="btn" id="calculateHashBtn">#️⃣ <span
+                                data-i18n="hash.calculate">计算哈希</span></button>
+                        <div class="form-group" style="margin-top:20px;">
+                            <label class="form-label">📋 <span data-i18n="hash.result">哈希结果</span></label>
+                            <div id="hashResults" class="hash-results"></div>
+                        </div>
+                    </div>
+                    <div id="file-hash-panel" style="display:none;">
+                        <div class="form-group">
+                            <label class="form-label">📁 <span data-i18n="hash.selectFile">选择文件</span></label>
+                            <div class="file-upload-wrapper">
+                                <div class="file-upload-area" id="fileHashUploadArea">
+                                    <span class="file-upload-icon">📤</span>
+                                    <div class="file-upload-text" data-i18n="hash.dragFile">点击或拖拽文件到此处</div>
+                                </div>
+                                <input type="file" id="fileHashInput" class="file-upload-input" accept="*/*">
+                            </div>
+                            <div class="file-info" id="fileHashInfo"></div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">🔐 选择算法</label>
+                            <select id="fileHashAlgo" class="form-control">
+                                <option value="sha256">SHA-256 (<span data-i18n="hash.recommended">推荐</span>)</option>
+                                <option value="sha512">SHA-512</option>
+                                <option value="sha3-256">SHA3-256</option>
+                                <option value="sha3-512">SHA3-512</option>
+                                <option value="sm3">SM3 (国密)</option>
+                                <option value="md5">MD5 (不推荐)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">🔍 <span data-i18n="hash.expectedHash">校验哈希（可选）</span></label>
+                            <input type="text" id="verifyHash" class="form-control"
+                                data-i18n-placeholder="hash.expectedHashPlaceholder" placeholder="粘贴预期的哈希值进行校验">
+                        </div>
+                        <button class="btn" id="calculateFileHashBtn">📋 <span
+                                data-i18n="hash.calculate">计算文件哈希</span></button>
+                        <div class="progress-container" id="fileHashProgress">
+                            <div class="progress-header">
+                                <span id="fileHashStatus" data-i18n="common.processing">准备中...</span>
+                                <span id="fileHashPercent">0%</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="fileHashProgressFill"></div>
+                            </div>
+                        </div>
+                        <div id="fileHashResults" class="hash-results"></div>
+                        <div id="hashVerifyResult" class="result-box"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 编码工具箱 -->
+            <div id="encoding-section" class="section">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon">🔧</div>
+                        <h2 class="card-title" data-i18n="encoding.title">编码工具箱</h2>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">选择编码方式</label>
+                        <div class="algo-selector">
+                            <div class="algo-option selected" data-encode="base32">
+                                <h4>📊 Base32</h4>
+                                <p>5位编码，常用于TOTP</p>
+                            </div>
+                            <div class="algo-option" data-encode="base58">
+                                <h4>₿ Base58</h4>
+                                <p>比特币地址编码</p>
+                            </div>
+                            <div class="algo-option" data-encode="vigenere">
+                                <h4>🔑 维吉尼亚</h4>
+                                <p>多表替换密码</p>
+                            </div>
+                            <div class="algo-option" data-encode="railfence">
+                                <h4>🚧 栅栏密码</h4>
+                                <p>换位密码</p>
+                            </div>
+                            <div class="algo-option" data-encode="bacon">
+                                <h4>🥓 培根密码</h4>
+                                <p>二进制编码</p>
+                            </div>
+                            <div class="algo-option" data-encode="atbash">
+                                <h4>🔄 埃特巴什</h4>
+                                <p>字母反转</p>
+                            </div>
+                            <div class="algo-option" data-encode="affine">
+                                <h4>📐 仿射密码</h4>
+                                <p>数学加密</p>
+                            </div>
+                            <div class="algo-option" data-encode="morse">
+                                <h4>📡 摩尔斯电码</h4>
+                                <p>经典电报编码</p>
+                            </div>
+                            <div class="algo-option" data-encode="emoji">
+                                <h4>😀 表情编码</h4>
+                                <p>趣味编码</p>
+                            </div>
+                            <div class="algo-option" data-encode="pigpen">
+                                <h4>🐽 猪圈密码</h4>
+                                <p>图形密码</p>
+                            </div>
+                            <div class="algo-option" data-encode="reverse">
+                                <h4>↩️ 文本反转</h4>
+                                <p>简单有趣</p>
+                            </div>
+                            <div class="algo-option" data-encode="binary">
+                                <h4>🔢 二进制</h4>
+                                <p>0和1编码</p>
+                            </div>
+                            <div class="algo-option" data-encode="octal">
+                                <h4>8️⃣ 八进制</h4>
+                                <p>0-7编码</p>
+                            </div>
+                            <div class="algo-option" data-encode="decimal">
+                                <h4>🔟 十进制</h4>
+                                <p>0-9编码</p>
+                            </div>
+                            <div class="algo-option" data-encode="hex">
+                                <h4>🔟 十六进制</h4>
+                                <p>Hex编码</p>
+                            </div>
+                            <div class="algo-option" data-encode="caesar">
+                                <h4>🏛️ 凯撒密码</h4>
+                                <p>古老加密法</p>
+                            </div>
+                            <div class="algo-option" data-encode="rot13">
+                                <h4>🔄 ROT13</h4>
+                                <p>字母偏移13位</p>
+                            </div>
+                            <div class="algo-option" data-encode="sm4">
+                                <h4>🇨🇳 SM4</h4>
+                                <p>国密对称加密</p>
+                            </div>
+                            <div class="algo-option" data-encode="chacha20">
+                                <h4>🌊 ChaCha20</h4>
+                                <p>流密码加密</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">📝 <span data-i18n="encoding.input">输入文本</span></label>
+                        <textarea id="encodingInput" class="form-control textarea"
+                            data-i18n-placeholder="encoding.inputPlaceholder" placeholder="输入要编码/解码的文本..."></textarea>
+                    </div>
+                    <div class="form-group" id="caesarShiftGroup" style="display:none;">
+                        <label class="form-label">🔢 凯撒偏移量：<span id="caesarShiftValue">3</span></label>
+                        <input type="range" id="caesarShift" min="1" max="25" value="3" class="range-slider">
+                    </div>
+                    <div class="form-group" id="vigenereKeyGroup" style="display:none;">
+                        <label class="form-label">🔑 维吉尼亚密钥</label>
+                        <input type="text" id="vigenereKey" class="form-control" placeholder="输入密钥（字母）">
+                    </div>
+                    <div class="form-group" id="railfenceRailsGroup" style="display:none;">
+                        <label class="form-label">🚧 栅栏数量：<span id="railfenceRailsValue">3</span></label>
+                        <input type="range" id="railfenceRails" min="2" max="10" value="3" class="range-slider">
+                    </div>
+                    <div class="form-group" id="affineParamsGroup" style="display:none;">
+                        <label class="form-label">📐 仿射参数 (a需与26互质)</label>
+                        <div style="display:flex;gap:10px;">
+                            <input type="number" id="affineA" class="form-control" value="5" min="1" max="25"
+                                style="width:80px;">
+                            <input type="number" id="affineB" class="form-control" value="8" min="0" max="25"
+                                style="width:80px;">
+                        </div>
+                    </div>
+                    <div class="form-group" id="sm4KeyGroup" style="display:none;">
+                        <label class="form-label">🇨🇳 SM4密钥 (16字节十六进制)</label>
+                        <input type="text" id="sm4Key" class="form-control"
+                            placeholder="如: 0123456789abcdeffedcba9876543210" maxlength="32">
+                        <small style="color:var(--gray);">留空则自动生成随机密钥</small>
+                    </div>
+                    <div class="form-group" id="chacha20KeyGroup" style="display:none;">
+                        <label class="form-label">🌊 ChaCha20密钥 (32字节十六进制)</label>
+                        <input type="text" id="chacha20Key" class="form-control" placeholder="64位十六进制" maxlength="64">
+                        <small style="color:var(--gray);">留空则自动生成随机密钥</small>
+                    </div>
+                    <div class="download-buttons">
+                        <button class="btn" id="encodingEncodeBtn">🔒 <span
+                                data-i18n="encoding.encode">编码</span></button>
+                        <button class="btn btn-outline" id="encodingDecodeBtn">🔓 <span
+                                data-i18n="encoding.decode">解码</span></button>
+                    </div>
+                    <div class="form-group" style="margin-top:20px;">
+                        <label class="form-label">📤 <span data-i18n="encoding.output">输出结果</span></label>
+                        <textarea id="encodingOutput" class="form-control textarea" readonly
+                            placeholder="结果将显示在这里..."></textarea>
+                    </div>
+                    <div class="download-buttons">
+                        <div class="download-btn" id="copyEncodingBtn"><span>📋</span><span
+                                data-i18n="encoding.copy">复制</span></div>
+                        <div class="download-btn" id="clearEncodingBtn"><span>🗑️</span><span
+                                data-i18n="encoding.clear">清空</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 数字签名 -->
+            <div id="signature-section" class="section">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon">✍️</div>
+                        <h2 class="card-title" data-i18n="sign.title">ECDSA 数字签名</h2>
+                    </div>
+                    <div class="mode-toggle">
+                        <button class="mode-toggle-btn active" data-mode="generate"><span
+                                data-i18n="asym.generateKey">生成密钥</span></button>
+                        <button class="mode-toggle-btn" data-mode="sign"><span
+                                data-i18n="sign.sign">文本签名</span></button>
+                        <button class="mode-toggle-btn" data-mode="verify"><span
+                                data-i18n="sign.verify">验证签名</span></button>
+                        <button class="mode-toggle-btn" data-mode="file-sign">文件签名</button>
+                    </div>
+                    <div id="signature-generate-panel">
+                        <button class="btn" id="generateSignKeysBtn">✍️ <span data-i18n="asym.generateECC">生成 ECDSA
+                                签名密钥对 (P-256)</span></button>
+                        <div class="form-group" style="margin-top:20px;">
+                            <label class="form-label">🔑 <span data-i18n="sign.publicKey">公钥</span></label>
+                            <textarea id="signPublicKey" class="form-control textarea" readonly
+                                placeholder="公钥将显示在这里..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">🔐 <span data-i18n="sign.privateKey">私钥</span></label>
+                            <textarea id="signPrivateKey" class="form-control textarea" readonly
+                                placeholder="私钥将显示在这里..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">🔍 密钥指纹</label>
+                            <input type="text" id="signKeyFingerprint" class="form-control" readonly
+                                placeholder="生成密钥后显示指纹...">
+                        </div>
+                        <div class="download-buttons">
+                            <div class="download-btn" id="downloadSignKeysBtn"><span>💾</span><span
+                                    data-i18n="asym.saveKey">保存密钥</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="signature-sign-panel" style="display:none;">
+                        <div class="form-group">
+                            <label class="form-label">🔐 <span data-i18n="sign.privateKey">签名私钥</span></label>
+                            <textarea id="signPrivateKeyInput" class="form-control textarea"
+                                data-i18n-placeholder="sign.pastePrivateKey" placeholder="粘贴您的私钥..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">📝 <span data-i18n="sign.textToSign">要签名的文本</span></label>
+                            <textarea id="signPlaintext" class="form-control textarea"
+                                placeholder="输入要签名的文本..."></textarea>
+                        </div>
+                        <button class="btn" id="signDataBtn">✍️ <span data-i18n="sign.signBtn">签名</span></button>
+                    </div>
+                    <div id="signature-verify-panel" style="display:none;">
+                        <div class="form-group">
+                            <label class="form-label">🔑 验证公钥</label>
+                            <textarea id="verifyPublicKey" class="form-control textarea"
+                                placeholder="粘贴签名者的公钥..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">📝 原始文本</label>
+                            <textarea id="verifyPlaintext" class="form-control textarea"
+                                placeholder="输入原始文本..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">🔏 签名（Base64）</label>
+                            <textarea id="verifySignature" class="form-control textarea"
+                                placeholder="粘贴签名..."></textarea>
+                        </div>
+                        <button class="btn btn-success" id="verifySignBtn">✅ 验证签名</button>
+                    </div>
+                    <div id="signature-file-sign-panel" style="display:none;">
+                        <div class="form-group">
+                            <label class="form-label">🔐 签名私钥</label>
+                            <textarea id="fileSignPrivateKey" class="form-control textarea"
+                                placeholder="粘贴您的私钥..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">🔓 签名公钥</label>
+                            <textarea id="fileSignPublicKey" class="form-control textarea"
+                                placeholder="粘贴您的公钥..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">📁 选择要签名的文件</label>
+                            <div class="file-upload-wrapper">
+                                <div class="file-upload-area" id="fileSignUploadArea">
+                                    <span class="file-upload-icon">📤</span>
+                                    <div class="file-upload-text">点击或拖拽文件到此处</div>
+                                </div>
+                                <input type="file" id="fileSignInput" class="file-upload-input" accept="*/*">
+                            </div>
+                            <div class="file-info" id="fileSignInfo"></div>
+                        </div>
+                        <button class="btn" id="fileSignBtn">✍️ 生成签名文件</button>
+                        <div class="form-group" style="margin-top:20px;">
+                            <label class="form-label">📁 验证文件签名</label>
+                            <p class="hint-text">选择原始文件和对应的 .sig 签名文件进行验证</p>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">📄 原始文件</label>
+                            <div class="file-upload-wrapper">
+                                <div class="file-upload-area" id="fileVerifyUploadArea">
+                                    <span class="file-upload-icon">📄</span>
+                                    <div class="file-upload-text">选择原始文件</div>
+                                </div>
+                                <input type="file" id="fileVerifyInput" class="file-upload-input" accept="*/*">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">🔏 签名文件 (.sig)</label>
+                            <div class="file-upload-wrapper">
+                                <div class="file-upload-area" id="sigFileUploadArea">
+                                    <span class="file-upload-icon">🔏</span>
+                                    <div class="file-upload-text">选择签名文件</div>
+                                </div>
+                                <input type="file" id="sigFileInput" class="file-upload-input" accept=".sig">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">🔑 公钥（可选，签名文件已包含）</label>
+                            <textarea id="fileVerifyPublicKey" class="form-control textarea"
+                                placeholder="留空则使用签名文件中嵌入的公钥..."></textarea>
+                        </div>
+                        <button class="btn btn-success" id="fileVerifyBtn">✅ 验证文件签名</button>
+                    </div>
+                    <div class="form-group" style="margin-top:20px;">
+                        <label class="form-label">📤 输出结果</label>
+                        <textarea id="signatureOutput" class="form-control textarea" readonly
+                            placeholder="结果将显示在这里..."></textarea>
+                    </div>
+                    <div class="download-buttons" id="signatureDownloadBtns" style="display:none;">
+                        <div class="download-btn" id="copySignatureBtn"><span>📋</span><span>复制</span></div>
+                        <div class="download-btn" id="downloadSignatureFileBtn"><span>💾</span><span>下载签名</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 密码生成器 -->
+            <div id="password-section" class="section">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon">🎲</div>
+                        <h2 class="card-title" data-i18n="password.title">安全密码生成器</h2>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">📏 <span data-i18n="password.length">密码长度</span>：<span
+                                id="pwdLengthValue">16</span></label>
+                        <input type="range" id="pwdLength" min="8" max="64" value="16" class="range-slider">
+                    </div>
+                    <div class="checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="pwdUpper" checked> <span
+                                data-i18n="password.uppercase">大写字母</span> (A-Z)
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="pwdLower" checked> <span
+                                data-i18n="password.lowercase">小写字母</span> (a-z)
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="pwdNumbers" checked> <span data-i18n="password.numbers">数字</span>
+                            (0-9)
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="pwdSymbols" checked> <span
+                                data-i18n="password.symbols">特殊符号</span> (!@#$%...)
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="pwdExclude"> <span
+                                data-i18n="password.excludeSimilar">排除相似字符</span> (0OIl1)
+                        </label>
+                    </div>
+                    <button class="btn" id="generatePwdBtn">🎲 <span data-i18n="password.generate">生成密码</span></button>
+                    <button class="btn btn-outline" id="generateMultiplePwdBtn">📋 <span
+                            data-i18n="password.generate">生成10个密码</span></button>
+                    <div class="form-group" style="margin-top:20px;">
+                        <label class="form-label">🔐 <span data-i18n="password.generate">生成的密码</span></label>
+                        <div id="generatedPasswords" class="password-list"></div>
+                    </div>
+                    <div class="password-strength" id="generatedPwdStrength"></div>
+                </div>
+            </div>
+
+            <!-- 密钥管理 -->
+            <div id="keygen-section" class="section">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon">🗝️</div>
+                        <h2 class="card-title" data-i18n="keygen.title">密钥管理</h2>
+                    </div>
+                    <div class="form-group">
+                        <p class="hint-text">生成高强度随机密钥用于加密。密钥仅在内存中生成，不会保存到任何存储。</p>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">📏 <span data-i18n="keygen.length">密钥长度</span></label>
+                        <select id="keyLength" class="form-control">
+                            <option value="16">128 位（16字节）</option>
+                            <option value="32" selected>256 位（32字节）- 推荐</option>
+                            <option value="64">512 位（64字节）</option>
+                        </select>
+                    </div>
+                    <button class="btn" id="generateKeyBtn">🎲 <span data-i18n="keygen.generate">生成随机密钥</span></button>
+                    <div class="key-display" id="keyDisplay">
+                        <div class="timer" id="keyTimer"><span data-i18n="keygen.clearAfter">5秒后清除</span></div>
+                        <div id="keyContent"></div>
+                    </div>
+                    <div class="result-box warning" style="display:block; margin-top:20px;">
+                        ⚠️ <strong>重要提示：</strong>密钥显示后将在5秒内自动清除，请立即记录。关闭页面后密钥将无法恢复！
+                    </div>
+                </div>
+            </div>
+
+            <!-- 密码强度检测 -->
+            <div id="password-strength-section" class="section">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon">📊</div>
+                        <h2 class="card-title">密码强度检测器</h2>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">🔐 输入待检测的密码</label>
+                        <input type="text" id="strengthCheckPassword" class="form-control" placeholder="请输入密码...">
+                    </div>
+                    <button class="btn" id="checkStrengthBtn">📊 检测密码强度</button>
+                    <div id="strengthResultContainer" style="display:none; margin-top:20px;">
+                        <div class="password-strength active" id="fullStrengthDisplay"></div>
+                        <div class="strength-details" id="strengthDetails"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 随机性检测 -->
+            <div id="randomness-section" class="section">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon">🎲</div>
+                        <h2 class="card-title">商用密码随机性检测</h2>
+                    </div>
+                    <div class="mode-toggle">
+                        <button class="mode-toggle-btn active" data-randomness-mode="text">📝 文本输入</button>
+                        <button class="mode-toggle-btn" data-randomness-mode="file">📁 文件输入</button>
+                    </div>
+                    <div id="randomness-text-panel">
+                        <div class="form-group">
+                            <label class="form-label">📝 输入二进制字符串或十六进制数据</label>
+                            <div class="algo-selector" style="margin-bottom:10px;">
+                                <div class="algo-option selected" data-randomness-input="binary">
+                                    <h4>01 二进制</h4>
+                                    <p>仅包含 0 和 1</p>
+                                </div>
+                                <div class="algo-option" data-randomness-input="hex">
+                                    <h4>0-9A-F 十六进制</h4>
+                                    <p>自动转换为二进制</p>
+                                </div>
+                            </div>
+                            <textarea id="randomnessInput" class="form-control textarea" rows="6"
+                                placeholder="输入二进制字符串 (例如: 01010101...) 或十六进制数据..."></textarea>
+                        </div>
+                    </div>
+                    <div id="randomness-file-panel" style="display:none;">
+                        <div class="form-group">
+                            <label class="form-label">📁 选择文件</label>
+                            <div class="file-upload-wrapper">
+                                <div class="file-upload-area" id="randomnessFileArea">
+                                    <span class="file-upload-icon">📤</span>
+                                    <div class="file-upload-text">点击或拖拽文件到此处</div>
+                                </div>
+                                <input type="file" id="randomnessFileInput" class="file-upload-input" accept="*/*">
+                            </div>
+                            <div class="file-info" id="randomnessFileInfo"></div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">📋 选择检测项目</label>
+                        <div class="checkbox-group" id="randomnessTests">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="testMonobit" checked> 单比特频数检测
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="testBlockFrequency" checked> 块内频数检测
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="testPoker" checked> 扑克检测 (m=4)
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="testRuns" checked> 游程总数检测
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="testLongestRun" checked> 块内最大游程检测
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="testRank" checked> 矩阵秩检测
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="testDFT" checked> 离散傅里叶检测
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="testApproximateEntropy" checked> 近似熵检测
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="testCumulativeSums" checked> 累加和检测
+                            </label>
+                        </div>
+                    </div>
+                    <button class="btn" id="runRandomnessTestsBtn">🎲 执行随机性检测</button>
+                    <div id="randomnessResults" style="display:none; margin-top:20px;"></div>
+                </div>
+            </div>
+
+            <!-- 自检功能 -->
+            <div id="selftest-section" class="section">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon">✅</div>
+                        <h2 class="card-title" data-i18n="selftest.title">自检 / 说明</h2>
+                    </div>
+                    <div class="mode-toggle">
+                        <button class="mode-toggle-btn active" data-selftest-type="test">✅ <span
+                                data-i18n="selftest.run">系统自检</span></button>
+                        <button class="mode-toggle-btn" data-selftest-type="guide">📖 使用说明</button>
+                    </div>
+                    <div id="selftest-panel">
+                        <div class="form-group">
+                            <p class="hint-text">执行完整的功能自检，验证所有加密组件正常工作。</p>
+                        </div>
+                        <button class="btn btn-success" id="runSelfTestBtn">▶️ <span
+                                data-i18n="selftest.run">运行自检</span></button>
+                        <div class="self-test-result" id="selfTestResult"></div>
+                    </div>
+                    <div id="guide-panel" style="display:none;">
+                        <div class="guide-content">
+                            <h3>🔐 加密工具</h3>
+                            <p>支持文件加密和文本加密，使用 AES-256-GCM 或 AES-256-CBC+HMAC。</p>
+                            <ul>
+                                <li><strong>安全等级:</strong> ★★★★★</li>
+                                <li><strong>使用场景:</strong> 加密敏感文件、备份保护</li>
+                                <li><strong>注意事项:</strong> 请牢记密码，密码丢失无法恢复</li>
+                            </ul>
+
+                            <h3>🔑 非对称加密</h3>
+                            <p>包含 RSA 和 ECC 两种非对称加密算法。</p>
+                            <ul>
+                                <li><strong>RSA:</strong> 2048/4096位，适合密钥分发</li>
+                                <li><strong>ECC:</strong> P-256曲线，更高效更安全</li>
+                            </ul>
+
+                            <h3>✍️ 数字签名</h3>
+                            <p>ECDSA 数字签名，验证数据来源和完整性。</p>
+                            <ul>
+                                <li><strong>文本签名:</strong> 对文本内容签名</li>
+                                <li><strong>文件签名:</strong> 生成独立 .sig 签名文件</li>
+                            </ul>
+
+                            <h3>#️⃣ 哈希校验</h3>
+                            <p>计算文本和文件的哈希值，验证数据完整性。</p>
+                            <ul>
+                                <li><strong>SHA-256/512:</strong> ★★★★★ 推荐</li>
+                                <li><strong>SHA3-256/512:</strong> ★★★★★ NIST新标准</li>
+                                <li><strong>SM3:</strong> ★★★★★ 国密算法</li>
+                                <li><strong>MD5:</strong> ★☆☆☆☆ 已破解，仅用于校验</li>
+                            </ul>
+
+                            <h3>🔧 编码工具箱</h3>
+                            <p>多种编码方式和加密算法。</p>
+                            <table class="guide-table">
+                                <tr>
+                                    <th>类型</th>
+                                    <th>算法</th>
+                                    <th>说明</th>
+                                </tr>
+                                <tr>
+                                    <td>编码</td>
+                                    <td>Base32/Base58</td>
+                                    <td>非加密，仅编码</td>
+                                </tr>
+                                <tr>
+                                    <td>古典密码</td>
+                                    <td>维吉尼亚/栅栏/凯撒</td>
+                                    <td>教学用途，安全性低</td>
+                                </tr>
+                                <tr>
+                                    <td>现代加密</td>
+                                    <td>SM4</td>
+                                    <td>国密对称加密 ★★★★★</td>
+                                </tr>
+                                <tr>
+                                    <td>现代加密</td>
+                                    <td>ChaCha20</td>
+                                    <td>流密码加密 ★★★★★</td>
+                                </tr>
+                                <tr>
+                                    <td>趣味编码</td>
+                                    <td>表情/猪圈/摩尔斯</td>
+                                    <td>娱乐用途</td>
+                                </tr>
+                            </table>
+
+                            <h3>🎲 密码生成器</h3>
+                            <p>生成安全的随机密码。</p>
+                            <ul>
+                                <li><strong>建议:</strong> 密码长度至少16位</li>
+                                <li><strong>建议:</strong> 包含大小写、数字、符号</li>
+                            </ul>
+
+                            <h3>⚠️ 安全提示</h3>
+                            <ul>
+                                <li>所有操作在本地完成，数据不上传服务器</li>
+                                <li>请妥善保管密码和密钥</li>
+                                <li>建议定期更换密码</li>
+                                <li>重要文件请多处备份加密文件</li>
+                                <li>点击侧边栏 🌙/☀️ 按钮切换暗色模式</li>
+                            </ul>
+
+                            <h3>💝 支持项目</h3>
+                            <p>SecureFx 是开源免费项目，您的支持是我们持续更新的动力！</p>
+                            <div class="donate-section">
+                                <div class="donate-method">
+                                    <div class="donate-title">☕ 请我喝杯咖啡</div>
+                                    <div class="donate-qrcode">
+                                        <div class="qr-item">
+                                            <img src="wechat-pay.png" alt="微信支付"
+                                                onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                                            <div class="qr-placeholder" style="display:none;">
+                                                <span>微信支付</span>
+                                            </div>
+                                            <p class="qr-label">微信支付</p>
+                                        </div>
+                                        <div class="qr-item">
+                                            <img src="alipay.png" alt="支付宝"
+                                                onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                                            <div class="qr-placeholder" style="display:none;">
+                                                <span>支付宝</span>
+                                            </div>
+                                            <p class="qr-label">支付宝</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="donate-methods-list">
+                                    <div class="donate-item">
+                                        <strong>爱发电</strong>
+                                        <a href="https://afdian.com/a/pinesis" target="_blank">afdian.com/a/pinesis</a>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <h3>📧 联系我们</h3>
+                            <ul>
+                                <li><strong>GitHub:</strong> <a href="#" target="_blank">github.com/pinesis688</a>
+                                </li>
+                                <li><strong>邮箱:</strong>ask@securefx.freeqiye.com</li>
+                                <li><strong>问题反馈:</strong> GitHub Issues</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <nav class="bottom-nav" id="mobile-nav">
+            <div class="nav-item active" data-target="file-encrypt-section"><span>🔐</span><span>加密</span></div>
+            <div class="nav-item" data-target="rsa-section"><span>🔑</span><span>非对称</span></div>
+            <div class="nav-item" data-target="signature-section"><span>✍️</span><span>签名</span></div>
+            <div class="nav-item" data-target="hash-section"><span>#️⃣</span><span>哈希</span></div>
+            <div class="nav-item" data-target="encoding-section"><span>🔧</span><span>编码</span></div>
+            <div class="nav-item" data-target="password-section"><span>🎲</span><span>密码</span></div>
+            <div class="nav-item" data-target="keygen-section"><span>🗝️</span><span>密钥</span></div>
+            <div class="nav-item" data-target="password-strength-section"><span>📊</span><span>强度</span></div>
+            <div class="nav-item" data-target="randomness-section"><span>🎲</span><span>随机性</span></div>
+            <div class="nav-item" data-target="selftest-section"><span>✅</span><span>自检</span></div>
+        </nav>
+
+        <script src="app.js"></script>
+</body>
+
+</html>
